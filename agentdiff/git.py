@@ -121,18 +121,38 @@ def get_changes(repo_root, since_ref="HEAD", staged_only=False):
 
 
 def _new_repo_changes(repo_root):
-    """For a brand-new repo with no commits, return staged (cached) files as added."""
-    r = _git(["ls-files", "--cached"], cwd=repo_root)
+    """
+    For a brand-new repo with no commits, return staged and untracked files.
+
+    git diff HEAD fails with no commits, so we query the index and the working
+    tree separately and union the results.
+    """
     changes = []
-    if r.returncode != 0:
-        return changes
-    for line in r.stdout.splitlines():
-        p = line.strip()
-        if not p:
-            continue
-        fc = FileChange("A", p)
-        _read_as_added(fc, os.path.join(repo_root, p))
-        changes.append(fc)
+    seen = set()
+
+    # Staged files (git add-ed but not yet committed)
+    r = _git(["ls-files", "--cached"], cwd=repo_root)
+    if r.returncode == 0:
+        for line in r.stdout.splitlines():
+            p = line.strip()
+            if not p:
+                continue
+            fc = FileChange("A", p)
+            _read_as_added(fc, os.path.join(repo_root, p))
+            changes.append(fc)
+            seen.add(p)
+
+    # Untracked files (not staged, not ignored)
+    r2 = _git(["ls-files", "--others", "--exclude-standard"], cwd=repo_root)
+    if r2.returncode == 0:
+        for line in r2.stdout.splitlines():
+            p = line.strip()
+            if p and p not in seen:
+                fc = FileChange("U", p)
+                _read_as_added(fc, os.path.join(repo_root, p))
+                changes.append(fc)
+                seen.add(p)
+
     return changes
 
 

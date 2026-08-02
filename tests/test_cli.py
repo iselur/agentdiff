@@ -182,5 +182,71 @@ class TestVersionCommand(unittest.TestCase):
         self.assertIn("0.1.0", out)
 
 
+class TestJsonOnError(unittest.TestCase):
+    """Regression: --json must produce valid parseable JSON even on error (exit 2)."""
+
+    def test_json_error_non_git_dir(self):
+        """--json in a non-git directory must print parseable JSON, not empty stdout."""
+        import tempfile
+        tmpdir = tempfile.mkdtemp(prefix="norepro_json_")
+        try:
+            out, _, code = _run_cmd(["review", "--json"], cwd=tmpdir)
+            self.assertEqual(code, 2)
+            data = json.loads(out)   # must not raise
+            self.assertIn("error", data)
+            self.assertFalse(data["gate_triggered"])
+            self.assertEqual(data["findings"], [])
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_json_error_bad_ref(self):
+        """--json with an unknown --since ref must print parseable JSON."""
+        repo = make_repo({"f.py": "x=1\n"})
+        try:
+            out, _, code = _run_cmd(
+                ["review", "--json", "--since", "totally-nonexistent-ref"],
+                cwd=repo,
+            )
+            self.assertEqual(code, 2)
+            data = json.loads(out)
+            self.assertIn("error", data)
+        finally:
+            shutil.rmtree(repo, ignore_errors=True)
+
+
+class TestIgnoreConfigBypass(unittest.TestCase):
+    """Regression: .agentdiff/ignore cannot silence its own modification."""
+
+    def setUp(self):
+        self.repo = make_repo({"README.md": "hi\n"})
+        # Create initial .agentdiff/ignore with a safe pattern
+        os.makedirs(os.path.join(self.repo, ".agentdiff"), exist_ok=True)
+        with open(os.path.join(self.repo, ".agentdiff", "ignore"), "w") as f:
+            f.write("dist/\n")
+        subprocess.run(["git", "add", ".agentdiff/ignore"], cwd=self.repo, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "add ignore", "--allow-empty"],
+            cwd=self.repo, capture_output=True,
+        )
+
+    def tearDown(self):
+        shutil.rmtree(self.repo, ignore_errors=True)
+
+    def test_ignore_bypass_detected(self):
+        """
+        Regression: writing ** to .agentdiff/ignore must not let the tool exit 0.
+
+        The fix: .agentdiff/ignore is never suppressed by its own patterns.
+        Modifying it always emits a MED finding so the exit code is 1, not 0.
+        The user sees the MED and knows to inspect what else changed.
+        """
+        with open(os.path.join(self.repo, ".agentdiff", "ignore"), "w") as f:
+            f.write("**\n")
+        write_file(self.repo, "secret.env", "AKIAIOSFODNN7EXAMPLE1234567890AB\n")
+        out, _, code = _run_cmd(["review"], cwd=self.repo)
+        self.assertIn("MED", out, "MED finding expected for .agentdiff/ignore modification")
+        self.assertEqual(code, 1, "exit must be 1 — tool must not silently exit 0 when ignore is tampered")
+
+
 if __name__ == "__main__":
     unittest.main()

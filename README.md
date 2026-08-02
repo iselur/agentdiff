@@ -120,12 +120,13 @@ each domain more deeply.
 | Severity | Rule | What it catches |
 |----------|------|-----------------|
 | HIGH | secrets | PEM private key blocks, AWS access key ID patterns, high-entropy tokens assigned to names containing key/token/secret/password |
-| HIGH | ci-release | `.github/workflows/`, Dockerfiles, `*.tf`, `.circleci/`, Jenkinsfile, Makefile release targets, deploy scripts |
-| HIGH | dependencies | Added or version-changed packages in requirements.txt, pyproject.toml, package.json, go.mod, Cargo.toml, Gemfile |
+| HIGH | ci-release | `.github/workflows/`, Dockerfiles, `*.tf`, `.circleci/`, Jenkinsfile, Makefile release targets, deploy scripts (shell/Python/Ruby/PowerShell — not YAML/JSON data files) |
+| HIGH | dependencies | Added or version-changed packages in requirements.txt, pyproject.toml, package.json, go.mod, Cargo.toml (section-aware), Gemfile, Pipfile. Lock files flagged as modified: package-lock.json, Gemfile.lock, poetry.lock, yarn.lock, pnpm-lock.yaml, Pipfile.lock, composer.lock |
+| MED | ignore-config | `.agentdiff/ignore` added or modified. The ignore file is never suppressed by its own patterns — an agent silencing its reviewer is always flagged |
 | MED | out-of-scope | Files changed outside the declared scope (only when scope is set) |
 | MED | deletion | File deleted or more than 50 lines removed from a file |
 | MED | executable | Executable bit added, or a new binary file added |
-| LOW | test-quality | Test files deleted, assertions removed, TODO/FIXME added, large (>1000 line) or minified-looking files added |
+| LOW | test-quality | Test files deleted or renamed out of the test tree, assertions removed, TODO/FIXME added, large (>1000 line) or minified-looking files added |
 
 LOW findings only affect the exit code under `--strict`.
 
@@ -247,8 +248,24 @@ before a commit or PR exists, with zero configuration and zero dependencies.
 
 - **The dependency rule reads added lines only.** It does not resolve package
   metadata, check for vulnerabilities, or detect transitive changes via lock
-  files (package-lock.json and Gemfile.lock are flagged as "lock file modified"
-  without line-level parsing). Use dependency-review-action for CVE context.
+  files. All lock files are flagged as "lock file modified" without line-level
+  parsing (too noisy to parse per-package). Use dependency-review-action for
+  CVE context. For per-package change detection in lock files, use socket.dev
+  or the GitHub dependency review action.
+
+- **Cargo.toml target-specific dependency sections are best-effort.** The
+  Cargo.toml parser is section-aware and correctly ignores `[package]`,
+  `[profile.*]`, and `[features]` keys. Standard sections (`[dependencies]`,
+  `[dev-dependencies]`, `[build-dependencies]`, `[workspace.dependencies]`) are
+  well-covered. Complex `[target.'cfg(...)'.dependencies]` expressions may have
+  edge cases in multi-hunk diffs where a section header is not visible as a
+  context line.
+
+- **`.agentdiff/ignore` bypass is detected, not prevented.** When an agent
+  overwrites `.agentdiff/ignore` with `**`, the tool emits a MED finding for
+  the ignore config change and exits 1 — it does not exit 0. However, other
+  files in the same changeset that match `**` are still suppressed by the
+  updated ignore list. The MED finding is the signal to investigate manually.
 
 - **No Windows path support.** The tool assumes POSIX paths throughout.
   Contributions welcome.

@@ -404,6 +404,305 @@ class TestGating(unittest.TestCase):
         findings = run_rules(changes, ignore_patterns=["*.pem"])
         self.assertFalse(findings, "Ignored file should produce no findings")
 
+    def test_ignore_config_never_suppresses_itself(self):
+        """
+        Regression: .agentdiff/ignore must not be hidden by its own ** pattern.
+
+        When an agent writes ** to the ignore file, the tool must still emit a
+        finding for the ignore file itself so the exit code is never 0. Other
+        files that match ** are still suppressed — the user is expected to
+        investigate after seeing the MED finding for the ignore config.
+        """
+        changes = [
+            make_change(path=".agentdiff/ignore", diff_text=diff_with_added(["**"]), status="M"),
+        ]
+        findings = run_rules(changes, ignore_patterns=["**"])
+        paths = [f.file for f in findings]
+        self.assertIn(".agentdiff/ignore", paths,
+                      ".agentdiff/ignore must not be hidden by its own ** pattern")
+
+    def test_ignore_config_modification_emits_med(self):
+        """Regression: modifying .agentdiff/ignore always produces a MED finding."""
+        changes = [
+            make_change(path=".agentdiff/ignore", diff_text=diff_with_added(["**"]), status="M"),
+        ]
+        findings = run_rules(changes, ignore_patterns=[])
+        rules = [f.rule for f in findings]
+        self.assertIn("ignore-config", rules, ".agentdiff/ignore modification must emit ignore-config MED")
+        med = [f for f in findings if f.rule == "ignore-config"]
+        self.assertEqual(med[0].severity, "MED")
+
+
+# ---------------------------------------------------------------------------
+# Cargo.toml section awareness
+# ---------------------------------------------------------------------------
+
+class TestCargoDependencies(unittest.TestCase):
+
+    def _make_cargo_diff(self, lines_in_sections):
+        """Build a Cargo.toml diff containing the given {section: [lines]} structure."""
+        parts = []
+        for section, lines in lines_in_sections.items():
+            parts.append(f"+{section}")
+            for line in lines:
+                parts.append(f"+{line}")
+        diff = (
+            "--- a/Cargo.toml\n+++ b/Cargo.toml\n"
+            "@@ -1,0 +1,10 @@\n"
+        ) + "\n".join(parts) + "\n"
+        return diff
+
+    def test_dep_in_dependencies_section_flagged(self):
+        diff = self._make_cargo_diff({"[dependencies]": ['serde = "1.0"']})
+        fc = make_change(path="Cargo.toml", diff_text=diff)
+        findings = rule_dependencies(fc)
+        names = [f.reason for f in findings]
+        self.assertTrue(any("serde" in r for r in names))
+
+    def test_dep_in_dev_dependencies_section_flagged(self):
+        diff = self._make_cargo_diff({"[dev-dependencies]": ['proptest = "1.0"']})
+        fc = make_change(path="Cargo.toml", diff_text=diff)
+        findings = rule_dependencies(fc)
+        self.assertTrue(any("proptest" in f.reason for f in findings))
+
+    def test_dep_in_build_dependencies_section_flagged(self):
+        diff = self._make_cargo_diff({"[build-dependencies]": ['cc = "1.0"']})
+        fc = make_change(path="Cargo.toml", diff_text=diff)
+        findings = rule_dependencies(fc)
+        self.assertTrue(any("cc" in f.reason for f in findings))
+
+    def test_license_in_package_section_not_flagged(self):
+        """Regression: [package] metadata keys must not produce dependency findings."""
+        diff = self._make_cargo_diff({"[package]": ['license = "MIT"', 'repository = "https://github.com/x"']})
+        fc = make_change(path="Cargo.toml", diff_text=diff)
+        findings = rule_dependencies(fc)
+        names = [f.reason for f in findings]
+        self.assertFalse(any("license" in r for r in names), "license key should not be flagged")
+        self.assertFalse(any("repository" in r for r in names), "repository key should not be flagged")
+
+    def test_profile_keys_not_flagged(self):
+        """Regression: [profile.release] keys must not produce dependency findings."""
+        diff = self._make_cargo_diff({"[profile.release]": ["opt-level = 3", "lto = true"]})
+        fc = make_change(path="Cargo.toml", diff_text=diff)
+        findings = rule_dependencies(fc)
+        names = [f.reason for f in findings]
+        self.assertFalse(any("opt-level" in r for r in names))
+        self.assertFalse(any("lto" in r for r in names))
+
+    def test_features_keys_not_flagged(self):
+        """Regression: [features] entries must not produce dependency findings."""
+        diff = self._make_cargo_diff({"[features]": ['metrics = ["prometheus"]']})
+        fc = make_change(path="Cargo.toml", diff_text=diff)
+        findings = rule_dependencies(fc)
+        self.assertFalse(any("metrics" in f.reason for f in findings))
+
+    def test_context_line_section_tracking(self):
+        """Deps added below a context-line [dependencies] header must be flagged."""
+        # Simulate a unified diff where [dependencies] is a context line (no leading +)
+        diff = (
+            "--- a/Cargo.toml\n+++ b/Cargo.toml\n"
+            "@@ -3,3 +3,4 @@\n"
+            " [dependencies]\n"         # context line
+            " serde = \"1.0\"\n"        # context line
+            "+my-dep = \"0.1\"\n"       # added line
+        )
+        fc = make_change(path="Cargo.toml", diff_text=diff)
+        findings = rule_dependencies(fc)
+        self.assertTrue(any("my-dep" in f.reason for f in findings))
+
+    def test_context_line_non_dep_section_not_flagged(self):
+        """Lines added inside a context-line [profile.release] section must not be flagged."""
+        diff = (
+            "--- a/Cargo.toml\n+++ b/Cargo.toml\n"
+            "@@ -5,3 +5,4 @@\n"
+            " [profile.release]\n"      # context line
+            " opt-level = 3\n"          # context line
+            "+lto = true\n"             # added line inside profile section
+        )
+        fc = make_change(path="Cargo.toml", diff_text=diff)
+        findings = rule_dependencies(fc)
+        self.assertFalse(any("lto" in f.reason for f in findings))
+
+
+# ---------------------------------------------------------------------------
+# YAML deploy script false positive
+# ---------------------------------------------------------------------------
+
+class TestCiReleaseYamlFalsePositive(unittest.TestCase):
+
+    def test_kubernetes_deployment_yaml_not_flagged(self):
+        """Regression: k8s/deployment.yaml must not be flagged as a deploy script."""
+        fc = make_change(path="k8s/deployment.yaml")
+        findings = rule_ci_release(fc)
+        self.assertFalse(findings, "Kubernetes deployment.yaml should not be flagged")
+
+    def test_release_config_yaml_not_flagged(self):
+        fc = make_change(path="release-config.yaml")
+        findings = rule_ci_release(fc)
+        self.assertFalse(findings, "release-config.yaml should not be flagged")
+
+    def test_publish_config_yml_not_flagged(self):
+        fc = make_change(path="publish_config.yml")
+        findings = rule_ci_release(fc)
+        self.assertFalse(findings, "publish_config.yml should not be flagged")
+
+    def test_deploy_sh_still_flagged(self):
+        """Shell deploy scripts must still be caught."""
+        fc = make_change(path="scripts/deploy.sh")
+        findings = rule_ci_release(fc)
+        self.assertTrue(findings, "deploy.sh should still be flagged")
+
+    def test_deploy_py_still_flagged(self):
+        fc = make_change(path="deploy.py")
+        findings = rule_ci_release(fc)
+        self.assertTrue(findings, "deploy.py should still be flagged")
+
+    def test_github_workflow_yaml_still_flagged(self):
+        """YAML files under .github/workflows/ must still be flagged (explicit CI glob)."""
+        fc = make_change(path=".github/workflows/release.yml")
+        findings = rule_ci_release(fc)
+        self.assertTrue(findings, ".github/workflows YAML must still be flagged")
+
+
+# ---------------------------------------------------------------------------
+# Lock file coverage
+# ---------------------------------------------------------------------------
+
+class TestLockFileCoverage(unittest.TestCase):
+
+    def _lock_finding(self, filename):
+        diff = diff_with_added(['[[package]]', 'name = "malicious"', 'version = "9.9.9"'])
+        fc = make_change(path=filename, diff_text=diff)
+        return rule_dependencies(fc)
+
+    def test_poetry_lock_flagged(self):
+        findings = self._lock_finding("poetry.lock")
+        self.assertTrue(findings)
+        self.assertIn("lock file", findings[0].reason)
+
+    def test_yarn_lock_flagged(self):
+        findings = self._lock_finding("yarn.lock")
+        self.assertTrue(findings)
+        self.assertIn("lock file", findings[0].reason)
+
+    def test_pnpm_lock_yaml_flagged(self):
+        findings = self._lock_finding("pnpm-lock.yaml")
+        self.assertTrue(findings)
+        self.assertIn("lock file", findings[0].reason)
+
+    def test_pipfile_lock_flagged(self):
+        findings = self._lock_finding("Pipfile.lock")
+        self.assertTrue(findings)
+        self.assertIn("lock file", findings[0].reason)
+
+    def test_composer_lock_flagged(self):
+        findings = self._lock_finding("composer.lock")
+        self.assertTrue(findings)
+        self.assertIn("lock file", findings[0].reason)
+
+    def test_pipfile_dep_flagged(self):
+        """Regression: a new package in Pipfile [packages] must be flagged."""
+        diff = (
+            "--- a/Pipfile\n+++ b/Pipfile\n"
+            "@@ -1,3 +1,4 @@\n"
+            " [packages]\n"
+            "+requests = \"*\"\n"
+        )
+        fc = make_change(path="Pipfile", diff_text=diff)
+        findings = rule_dependencies(fc)
+        self.assertTrue(any("requests" in f.reason for f in findings))
+
+    def test_pipfile_non_package_section_not_flagged(self):
+        """[pipenv] or other Pipfile sections must not produce dep findings."""
+        diff = (
+            "--- a/Pipfile\n+++ b/Pipfile\n"
+            "@@ -1,3 +1,4 @@\n"
+            " [pipenv]\n"
+            "+allow_prereleases = true\n"
+        )
+        fc = make_change(path="Pipfile", diff_text=diff)
+        findings = rule_dependencies(fc)
+        self.assertFalse(any("allow_prereleases" in f.reason for f in findings))
+
+
+# ---------------------------------------------------------------------------
+# package.json comma artifact
+# ---------------------------------------------------------------------------
+
+class TestPackageJsonCommaArtifact(unittest.TestCase):
+
+    def test_single_new_dep_produces_one_finding(self):
+        """
+        Regression: adding date-fns after express should produce exactly one finding
+        (date-fns), not two (express + date-fns).
+        """
+        diff = (
+            '--- a/package.json\n+++ b/package.json\n'
+            '@@ -3,4 +3,5 @@\n'
+            '   "dependencies": {\n'
+            '-    "express": "^4.18.0"\n'
+            '+    "express": "^4.18.0",\n'
+            '+    "date-fns": "^3.0.0"\n'
+            '   }\n'
+        )
+        fc = make_change(path="package.json", diff_text=diff)
+        findings = rule_dependencies(fc)
+        names = [f.reason for f in findings]
+        self.assertFalse(
+            any("express" in n for n in names),
+            "express only gained a trailing comma — must not be flagged",
+        )
+        self.assertTrue(
+            any("date-fns" in n for n in names),
+            "date-fns is the real new dependency — must be flagged",
+        )
+
+    def test_genuinely_changed_dep_still_flagged(self):
+        """A dep whose version string actually changed must still be flagged."""
+        diff = (
+            '--- a/package.json\n+++ b/package.json\n'
+            '@@ -3,4 +3,4 @@\n'
+            '   "dependencies": {\n'
+            '-    "express": "^4.18.0"\n'
+            '+    "express": "^5.0.0"\n'
+            '   }\n'
+        )
+        fc = make_change(path="package.json", diff_text=diff)
+        findings = rule_dependencies(fc)
+        self.assertTrue(any("express" in f.reason for f in findings))
+
+
+# ---------------------------------------------------------------------------
+# Test file rename detection
+# ---------------------------------------------------------------------------
+
+class TestTestFileRename(unittest.TestCase):
+
+    def test_rename_out_of_test_tree_flagged(self):
+        """Regression: git mv tests/test_auth.py archive/ should emit a LOW finding."""
+        fc = make_change(
+            status="R",
+            path="archive/test_auth.py.bak",
+            old_path="tests/test_auth.py",
+        )
+        findings = rule_test_quality(fc)
+        self.assertTrue(findings, "Renaming test out of tree should produce a finding")
+        self.assertEqual(findings[0].severity, "LOW")
+        self.assertIn("renamed", findings[0].reason)
+
+    def test_rename_within_test_tree_not_flagged(self):
+        """Renaming one test file to another test file should not produce a finding."""
+        fc = make_change(
+            status="R",
+            path="tests/test_auth_v2.py",
+            old_path="tests/test_auth.py",
+        )
+        findings = rule_test_quality(fc)
+        self.assertFalse(
+            any("renamed" in f.reason for f in findings),
+            "Rename within test tree should not be flagged",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

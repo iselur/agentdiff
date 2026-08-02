@@ -153,6 +153,26 @@ class TestGetChangesNewRepo(unittest.TestCase):
         paths = [c.path for c in changes]
         self.assertIn("first.py", paths)
 
+    def test_new_repo_untracked_files_returned(self):
+        """
+        Regression: untracked files in a fresh repo (no commits) must not be
+        silently invisible. The old _new_repo_changes only checked --cached.
+        """
+        write_file(self.repo, "config.py", 'SECRET_KEY = "aB3dE6gH9jKlMnOpQrStUvWxYz0123456789ABCDE"\n')
+        # Deliberately do NOT stage the file
+        changes = get_changes(self.repo)
+        paths = [c.path for c in changes]
+        self.assertIn("config.py", paths,
+                      "Untracked file in a fresh repo must appear in changes")
+
+    def test_new_repo_untracked_diff_text_populated(self):
+        """Untracked files in a fresh repo must have diff_text so rules can fire."""
+        write_file(self.repo, "secret.env", "AKIAIOSFODNN7EXAMPLE1234567890AB\n")
+        changes = get_changes(self.repo)
+        u = next((c for c in changes if c.path == "secret.env"), None)
+        self.assertIsNotNone(u, "secret.env must be in changes")
+        self.assertIn("AKIAIOSFODNN7EXAMPLE", u.diff_text)
+
 
 if __name__ == "__main__":
     unittest.main()

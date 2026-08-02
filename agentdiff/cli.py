@@ -152,11 +152,27 @@ def _write_report(findings, changes, since_ref, report_path):
 # Commands
 # ---------------------------------------------------------------------------
 
+def _json_error(message):
+    """Print a JSON error document to stdout and return 2."""
+    print(json.dumps({
+        "error": message,
+        "findings": [],
+        "files_changed": 0,
+        "clean": False,
+        "gate_triggered": False,
+        "counts": {"HIGH": 0, "MED": 0, "LOW": 0},
+    }))
+    return 2
+
+
 def cmd_review(args):
     """agentdiff review — analyse working-tree changes."""
+    use_json = getattr(args, "json", False)
     try:
         repo_root = find_repo_root()
     except GitError as e:
+        if use_json:
+            return _json_error(str(e))
         print(f"error: {e}", file=sys.stderr)
         return 2
 
@@ -171,6 +187,8 @@ def cmd_review(args):
             staged_only=getattr(args, "staged_only", False),
         )
     except GitError as e:
+        if use_json:
+            return _json_error(str(e))
         print(f"error: {e}", file=sys.stderr)
         return 2
 
@@ -179,7 +197,7 @@ def cmd_review(args):
     if getattr(args, "report", None):
         _write_report(findings, changes, since_ref, args.report)
 
-    if getattr(args, "json", False):
+    if use_json:
         return _print_review_json(findings, changes, args.strict)
     return _print_review(findings, changes, args.strict)
 
