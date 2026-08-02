@@ -19,7 +19,7 @@ characterization testing.
 ## 30-second quickstart
 
 ```bash
-pip install agentdiff
+pip install git+https://github.com/iselur/agentdiff
 
 # Inside any git repo, after an agent session:
 agentdiff review
@@ -275,10 +275,28 @@ before a commit or PR exists, with zero configuration and zero dependencies.
 ## Installation
 
 ```bash
-pip install agentdiff
+pip install git+https://github.com/iselur/agentdiff
+```
+
+Or run it straight from a checkout, no install needed — it is stdlib only:
+
+```bash
+git clone https://github.com/iselur/agentdiff
+cd agentdiff && python3 -m agentdiff --help
 ```
 
 Requires Python 3.9+, git in PATH. Zero third-party dependencies.
+
+## Part of a small family
+
+Four tools for working with coding agents, same house style: zero dependencies,
+MIT, no API key, nothing leaves your machine. None of them call a model — that is
+the point, since the thing being checked already is one.
+
+- [stillworks](https://github.com/iselur/stillworks) — record what your code does now, catch when it changes later
+- [agentdiff](https://github.com/iselur/agentdiff) — see what the agent actually changed, before you merge  ← you are here
+- [agentlog](https://github.com/iselur/agentlog) — what did your coding agent actually do today?
+- [unedit](https://github.com/iselur/unedit) — a safety net for letting an agent loose on your files
 
 ## License
 
