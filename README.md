@@ -19,7 +19,8 @@ characterization testing.
 ## 30-second quickstart
 
 ```bash
-pip install agentdiff-cli   # the command is `agentdiff`
+pip install 'stillworks[all]'   # all four agent tools, including this one
+pip install agentdiff-cli       # or just this one (the command is `agentdiff`)
 
 # Inside any git repo, after an agent session:
 agentdiff review
@@ -300,6 +301,13 @@ the point, since the thing being checked already is one.
 - [agentdiff](https://github.com/iselur/agentdiff) — see what the agent actually changed, before you merge  ← you are here
 - [agentlog](https://github.com/iselur/agentlog) — what did your coding agent actually do today?
 - [unedit](https://github.com/iselur/unedit) — a safety net for letting an agent loose on your files
+
+One install gets all four, and `stillworks tools` says which ones you have:
+
+```sh
+pip install 'stillworks[all]'
+stillworks tools
+```
 
 ## License
 
