@@ -19,7 +19,7 @@ characterization testing.
 ## 30-second quickstart
 
 ```bash
-pip install git+https://github.com/iselur/agentdiff
+pip install agentdiff-cli   # the command is `agentdiff`
 
 # Inside any git repo, after an agent session:
 agentdiff review
@@ -275,8 +275,11 @@ before a commit or PR exists, with zero configuration and zero dependencies.
 ## Installation
 
 ```bash
-pip install git+https://github.com/iselur/agentdiff
+pip install agentdiff-cli
 ```
+
+(The PyPI name is `agentdiff-cli` because `agent-diff` was already taken. The
+command, the module, and the repo are all just `agentdiff`.)
 
 Or run it straight from a checkout, no install needed — it is stdlib only:
 

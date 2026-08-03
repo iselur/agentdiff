@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "agentdiff"
+name = "agentdiff-cli"
 version = "0.1.0"
 description = "Deterministic triage of an AI agent's changes — see what it actually touched before you merge."
 readme = "README.md"
