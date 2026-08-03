@@ -28,11 +28,20 @@ def _agentdiff_dir(repo_root):
 
 
 def _load_file_lines(path):
-    """Read a config file and return non-blank, non-comment lines."""
+    """Read a config file and return non-blank, non-comment lines.
+
+    A config file that cannot be read is not a reason to refuse to review.  It
+    is somebody's own directory: the file may be unreadable, a directory, or
+    not text at all, and none of that says anything about the diff.
+    """
     if not os.path.isfile(path):
         return []
-    with open(path) as f:
-        return [line.strip() for line in f if line.strip() and not line.startswith("#")]
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return []
+    return [line.strip() for line in lines if line.strip() and not line.startswith("#")]
 
 
 def _load_scope(repo_root):
@@ -195,7 +204,16 @@ def cmd_review(args):
     findings = run_rules(changes, scope_globs=scope_globs, ignore_patterns=ignore_patterns)
 
     if getattr(args, "report", None):
-        _write_report(findings, changes, since_ref, args.report)
+        try:
+            _write_report(findings, changes, since_ref, args.report)
+        except OSError as e:
+            # The report is the evidence.  Printing the review as if it had been
+            # written leaves somebody looking for a file that is not there.
+            msg = "could not write report to {}: {}".format(args.report, e)
+            if use_json:
+                return _json_error(msg)
+            print("error: {}".format(msg), file=sys.stderr)
+            return 2
 
     if use_json:
         return _print_review_json(findings, changes, args.strict)
@@ -210,12 +228,28 @@ def cmd_scope(args):
         print(f"error: {e}", file=sys.stderr)
         return 2
 
+    for g in args.globs:
+        # The scope file is one glob per line, so a glob containing a newline
+        # would be stored as two — and the second one is usually "**", which
+        # quietly widens the scope every later review is checked against.
+        if not g.strip():
+            print("error: an empty scope glob matches nothing — give a pattern",
+                  file=sys.stderr)
+            return 2
+        if "\n" in g or "\r" in g:
+            print(f"error: a scope glob cannot contain a newline: {g!r}", file=sys.stderr)
+            return 2
+
     d = _agentdiff_dir(repo_root)
-    os.makedirs(d, exist_ok=True)
     scope_path = os.path.join(d, "scope")
-    with open(scope_path, "w") as f:
-        for g in args.globs:
-            f.write(g + "\n")
+    try:
+        os.makedirs(d, exist_ok=True)
+        with open(scope_path, "w") as f:
+            for g in args.globs:
+                f.write(g + "\n")
+    except OSError as e:
+        print(f"error: could not save scope to {scope_path}: {e}", file=sys.stderr)
+        return 2
     print(f"scope saved: {', '.join(args.globs)}")
     print(f"  stored in {scope_path}")
     return 0
@@ -286,9 +320,14 @@ def _build_parser():
     return p
 
 
-def main():
+def main(argv=None):
+    """Entry point.  ``argv`` defaults to the real command line.
+
+    Taking it as an argument is what lets the tests drive the whole CLI in
+    process, rather than only the pieces underneath it.
+    """
     parser = _build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.command == "review":
         sys.exit(cmd_review(args))

@@ -6,6 +6,7 @@ Nothing here modifies the repo.
 """
 
 import os
+import stat
 import subprocess
 
 
@@ -13,17 +14,43 @@ class GitError(Exception):
     """Raised when git is unavailable, the directory is not a repo, or a ref is bad."""
 
 
-def _git(args, cwd):
-    """Run git with the given args in cwd. Returns CompletedProcess. Never raises on non-zero."""
+DEFAULT_TIMEOUT = 60
+
+
+def _git(args, cwd, timeout=DEFAULT_TIMEOUT):
+    """Run git with the given args in cwd. Returns CompletedProcess. Never raises on non-zero.
+
+    ``core.quotePath=false`` stops git escaping non-ASCII filenames into
+    ``"caf\\303\\251.py"``, which is a display form and not a path any of this
+    can open.
+
+    A timeout because git is not always fast: a filter driver, a lock held by
+    another process, a network remote.  agentdiff runs in pre-commit hooks,
+    and a hook that never returns is a hook nobody can get out of.
+    """
     try:
         return subprocess.run(
-            ["git"] + list(args),
+            ["git", "-c", "core.quotePath=false"] + list(args),
             cwd=cwd,
             capture_output=True,
             text=True,
+            timeout=timeout,
         )
     except FileNotFoundError:
         raise GitError("git not found in PATH")
+    except subprocess.TimeoutExpired:
+        raise GitError(
+            "git took longer than {}s to answer: {}".format(timeout, " ".join(args[:2])))
+
+
+def _split_z(text):
+    """Fields from git's ``-z`` output.
+
+    NUL is the one byte a filename cannot contain, which is the whole reason
+    ``-z`` exists.  Splitting on newlines instead means a file called
+    ``a\\nb.py`` arrives as two paths that do not exist.
+    """
+    return [field for field in text.split("\0") if field]
 
 
 def find_repo_root(start=None):
@@ -65,7 +92,12 @@ def get_changes(repo_root, since_ref="HEAD", staged_only=False):
     Raises GitError on bad repo or unknown ref.
     """
     if not _has_commits(repo_root):
-        return _new_repo_changes(repo_root)
+        # A ref the person named still has to exist, first commit or not.
+        # Silently ignoring it reviews something other than what was asked for
+        # and reports success, which is the worst of the available outcomes.
+        if since_ref not in ("HEAD", None) and not _ref_exists(repo_root, since_ref):
+            raise GitError(f"unknown ref: {since_ref!r}")
+        return _new_repo_changes(repo_root, staged_only=staged_only)
 
     if not _ref_exists(repo_root, since_ref):
         raise GitError(f"unknown ref: {since_ref!r}")
@@ -73,31 +105,36 @@ def get_changes(repo_root, since_ref="HEAD", staged_only=False):
     cache = ["--cached"] if staged_only else []
 
     # 1. Tracked file changes
-    r = _git(["diff"] + cache + ["-M", "--name-status", since_ref], cwd=repo_root)
+    r = _git(["diff"] + cache + ["-M", "--name-status", "-z", since_ref], cwd=repo_root)
     if r.returncode != 0:
         raise GitError(f"git diff failed: {r.stderr.strip()}")
 
     changes = []
     seen = set()
 
-    for raw in r.stdout.splitlines():
-        if not raw.strip():
-            continue
-        parts = raw.split("\t")
-        code = parts[0][0]
-        if code == "R" and len(parts) >= 3:
-            fc = FileChange("R", parts[2], old_path=parts[1])
+    # -z output is a flat NUL-separated stream: a status, then one path, except
+    # for renames and copies which are followed by two.
+    fields = _split_z(r.stdout)
+    i = 0
+    while i < len(fields):
+        code = fields[i][:1]
+        if code in ("R", "C") and i + 2 < len(fields):
+            fc = FileChange("R" if code == "R" else code, fields[i + 2],
+                            old_path=fields[i + 1])
+            i += 3
+        elif i + 1 < len(fields):
+            fc = FileChange(code, fields[i + 1])
+            i += 2
         else:
-            fc = FileChange(code, parts[1])
+            break
         changes.append(fc)
         seen.add(fc.path)
 
     # 2. Untracked files (working-tree mode only)
     if not staged_only:
-        r2 = _git(["ls-files", "--others", "--exclude-standard"], cwd=repo_root)
+        r2 = _git(["ls-files", "--others", "--exclude-standard", "-z"], cwd=repo_root)
         if r2.returncode == 0:
-            for line in r2.stdout.splitlines():
-                p = line.strip()
+            for p in _split_z(r2.stdout):
                 if p and p not in seen:
                     changes.append(FileChange("U", p))
                     seen.add(p)
@@ -120,38 +157,37 @@ def get_changes(repo_root, since_ref="HEAD", staged_only=False):
     return changes
 
 
-def _new_repo_changes(repo_root):
+def _new_repo_changes(repo_root, staged_only=False):
     """
     For a brand-new repo with no commits, return staged and untracked files.
 
     git diff HEAD fails with no commits, so we query the index and the working
-    tree separately and union the results.
+    tree separately and union the results.  ``staged_only`` still means staged
+    only: a pre-commit hook on the very first commit must review what is about
+    to be committed, not everything lying around next to it.
     """
     changes = []
     seen = set()
 
     # Staged files (git add-ed but not yet committed)
-    r = _git(["ls-files", "--cached"], cwd=repo_root)
+    r = _git(["ls-files", "--cached", "-z"], cwd=repo_root)
     if r.returncode == 0:
-        for line in r.stdout.splitlines():
-            p = line.strip()
-            if not p:
-                continue
+        for p in _split_z(r.stdout):
             fc = FileChange("A", p)
             _read_as_added(fc, os.path.join(repo_root, p))
             changes.append(fc)
             seen.add(p)
 
     # Untracked files (not staged, not ignored)
-    r2 = _git(["ls-files", "--others", "--exclude-standard"], cwd=repo_root)
-    if r2.returncode == 0:
-        for line in r2.stdout.splitlines():
-            p = line.strip()
-            if p and p not in seen:
-                fc = FileChange("U", p)
-                _read_as_added(fc, os.path.join(repo_root, p))
-                changes.append(fc)
-                seen.add(p)
+    if not staged_only:
+        r2 = _git(["ls-files", "--others", "--exclude-standard", "-z"], cwd=repo_root)
+        if r2.returncode == 0:
+            for p in _split_z(r2.stdout):
+                if p not in seen:
+                    fc = FileChange("U", p)
+                    _read_as_added(fc, os.path.join(repo_root, p))
+                    changes.append(fc)
+                    seen.add(p)
 
     return changes
 
@@ -169,7 +205,18 @@ def _fill_diff(fc, repo_root, since_ref, cache):
 
 
 def _read_as_added(fc, full_path):
-    """Read a file from disk and format each line as +line (for untracked/new files)."""
+    """Read a file from disk and format each line as +line (for untracked/new files).
+
+    Only regular files are opened.  Opening a FIFO blocks until somebody on the
+    other end writes, and agentdiff runs in pre-commit hooks: a stray pipe in an
+    untracked directory would stop the commit with no way to see why.
+    """
+    try:
+        st = os.lstat(full_path)
+    except OSError:
+        return
+    if not stat.S_ISREG(st.st_mode):
+        return
     try:
         with open(full_path, "rb") as f:
             raw = f.read(8192)
@@ -191,9 +238,9 @@ def _parse_exec_added(summary_text):
         if s.startswith("create mode 100755 "):
             paths.add(s[len("create mode 100755 "):])
         # "mode change 100644 => 100755 path/to/file"
-        elif "mode change" in s and "=> 100755" in s:
-            # Take the last whitespace-separated token as the path
-            parts = s.split()
-            if parts:
-                paths.add(parts[-1])
+        elif s.startswith("mode change ") and "=> 100755 " in s:
+            # Everything after the mode is the path.  Taking the last
+            # whitespace-separated token instead loses every filename with a
+            # space in it, and then the executable bit goes unreported.
+            paths.add(s.split("=> 100755 ", 1)[1])
     return paths
