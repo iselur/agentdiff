@@ -95,6 +95,7 @@ agentdiff review [--project DIR] [--since GIT_REF] [--scope GLOB]... [--json]
 
 agentdiff scope GLOB...     # save the intended scope to .agentdiff/scope
 agentdiff rules             # print every rule and what it flags
+agentdiff --version         # print the version and exit
 ```
 
 **`--project DIR`** Review that repository instead of the current directory,
