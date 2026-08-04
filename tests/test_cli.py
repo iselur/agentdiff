@@ -39,9 +39,19 @@ class TestReviewClean(unittest.TestCase):
         _, _, code = _run_cmd(["review"], cwd=self.repo)
         self.assertEqual(code, 0)
 
-    def test_clean_repo_prints_clean(self):
+    def test_a_reviewed_change_with_no_findings_prints_clean(self):
+        # This used to make no change at all and assert "clean", which was the
+        # tool calling a review that examined nothing a passing review.  The
+        # point it was making — an unremarkable change is clean — needs an
+        # actual change to make it.  See tests/test_nothing_reviewed.py.
+        write_file(self.repo, "src/app.py", "x = 1\ny = 2\n")
+        stage_file(self.repo, "src/app.py")
         out, _, _ = _run_cmd(["review"], cwd=self.repo)
         self.assertIn("clean", out)
+
+    def test_no_change_at_all_is_not_called_clean(self):
+        out, _, _ = _run_cmd(["review"], cwd=self.repo)
+        self.assertNotIn("clean", out.lower(), out)
 
 
 class TestReviewFindings(unittest.TestCase):

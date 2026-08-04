@@ -71,6 +71,7 @@ here for width; the real output is indented:
     {"severity": "LOW",  "file": "src/main.py",      "line": 1, "reason": "TODO/FIXME added", "rule": "test-quality"}
   ],
   "files_changed": 3,
+  "reviewed": 3,
   "clean": false,
   "gate_triggered": true,
   "counts": {"HIGH": 2, "MED": 2, "LOW": 1}
@@ -295,6 +296,18 @@ before a commit or PR exists, with zero configuration and zero dependencies.
   call failed and exits 2. It will not exit 0 on a repository it could not
   read, because on the `--staged-only` pre-commit path that is a gate opening
   for changes nobody looked at.
+
+- **An empty diff is not a clean review.** The limit above covers git failing;
+  this one covers git answering honestly that nothing changed. That used to
+  print `clean: 0 file(s) changed, nothing flagged` — the tool's verdict word
+  on a review that examined nothing — which is what you get from a pre-commit
+  hook that runs before `git add`, or from CI pointed at a `--since` ref that
+  is not the one the author meant. It now says no changes were reviewed and
+  names the ref, and `--json` carries a `reviewed` count so a script can tell
+  the difference. The exit code stays **0**, unlike stillworks' equivalent,
+  which exits 2: an empty diff is an ordinary, true state of a repository and a
+  hook that starts failing on it is worse than the problem, whereas a lockfile
+  whose every record is excluded is always a misconfiguration.
 
 - **No Windows path support.** The tool assumes POSIX paths throughout.
   Contributions welcome.

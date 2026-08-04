@@ -162,13 +162,40 @@ def _fmt_finding(f):
     return f"  {_SEV_PAD.get(f.severity, f.severity)}  {loc}  {_safe(f.reason)}"
 
 
-def _print_review(findings, changes, strict, out=None):
+def _nothing_reviewed_line(since_ref, staged_only):
+    """What to say when the diff was empty, instead of calling it clean.
+
+    `clean` means the changes were examined and none were flagged.  With no
+    changes nothing was examined, and saying `clean: 0 file(s) changed` put
+    this tool's verdict word on a review that never happened.  The two ways it
+    happens are both mundane — a pre-commit hook that runs before `git add`,
+    and CI pointed at a `--since` ref that is not the one the author meant —
+    and both are silently, permanently green.
+
+    So name the ref, since a ref that isn't what you think is the whole of the
+    second failure, and say plainly that there was nothing to look at.
+    """
+    if staged_only:
+        return "no changes: nothing is staged, so nothing was reviewed"
+    return ("no changes against {}, so nothing was reviewed".format(since_ref))
+
+
+def _print_review(findings, changes, strict, out=None,
+                  since_ref="HEAD", staged_only=False):
     """Print human-readable review output. Returns the appropriate exit code."""
     if out is None:
         out = sys.stdout
 
     n_files = len(set(c.path for c in changes))
     gating = gating_findings(findings, strict=strict)
+
+    if not changes:
+        # Still 0, deliberately: an empty diff is an ordinary state of a
+        # repository and every pre-commit hook in the world runs this.  What
+        # changes is the word, so a green hook is readable.  See the README on
+        # why stillworks' equivalent does exit 2 and this one does not.
+        print(_nothing_reviewed_line(since_ref, staged_only), file=out)
+        return 0
 
     if not findings:
         print(f"clean: {n_files} file(s) changed, nothing flagged", file=out)
@@ -213,6 +240,11 @@ def _print_review_json(findings, changes, strict):
             for f in findings
         ],
         "files_changed": len(set(c.path for c in changes)),
+        # How many files this run actually looked at.  `clean` says only that
+        # nothing was flagged, which is also true of a review that examined
+        # nothing, and `clean` is the field a CI script reads to decide whether
+        # to merge.  A script can now tell the two apart.
+        "reviewed": len(set(c.path for c in changes)),
         "clean": len(findings) == 0,
         "gate_triggered": len(gating) > 0,
         "counts": {s: sum(1 for f in findings if f.severity == s) for s in SEVERITY},
@@ -248,7 +280,11 @@ def _write_report(findings, changes, since_ref, report_path):
             lines.append(f"- **{loc}** — {_safe(f.reason)}")
         lines.append("")
 
-    if not findings:
+    if not changes:
+        # Same distinction as the review line: this report is the evidence
+        # somebody keeps, and "nothing flagged" reads as a review that passed.
+        lines += ["_No changes to review — nothing was examined._", ""]
+    elif not findings:
         lines += ["_Nothing flagged._", ""]
 
     with open(report_path, "w") as fh:
@@ -315,7 +351,8 @@ def cmd_review(args):
 
     if use_json:
         return _print_review_json(findings, changes, args.strict)
-    return _print_review(findings, changes, args.strict)
+    return _print_review(findings, changes, args.strict, since_ref=since_ref,
+                         staged_only=getattr(args, "staged_only", False))
 
 
 def cmd_scope(args):
