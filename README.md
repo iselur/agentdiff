@@ -82,12 +82,18 @@ here for width; the real output is indented:
 ## CLI reference
 
 ```
-agentdiff review [--since GIT_REF] [--scope GLOB]... [--json] [--report FILE]
-                 [--strict] [--staged-only | --pre-commit]
+agentdiff review [--project DIR] [--since GIT_REF] [--scope GLOB]... [--json]
+                 [--report FILE] [--strict] [--staged-only | --pre-commit]
 
 agentdiff scope GLOB...     # save the intended scope to .agentdiff/scope
 agentdiff rules             # print every rule and what it flags
 ```
+
+**`--project DIR`** Review that repository instead of the current directory,
+before or after the subcommand. CI checks out into one directory and runs from
+another, and an agent driving several checkouts shouldn't have to `cd` for each
+one. The same flag the rest of the family uses; a path that isn't there is an
+error naming it.
 
 **`--since GIT_REF`** Compare the working tree against that ref instead of
 HEAD. Useful when the agent was handed a feature branch and you want to see

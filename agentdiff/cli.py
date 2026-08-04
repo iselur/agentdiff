@@ -29,6 +29,27 @@ def _agentdiff_dir(repo_root):
     return os.path.join(repo_root, ".agentdiff")
 
 
+def _resolve_repo_root(args):
+    """Find the repository, starting from ``--project`` if one was named.
+
+    Asking git about the current directory is the right default and was for a
+    while the only option, which made `cd` a required step: CI checks out into
+    one directory and runs from another, a pre-commit wrapper runs from
+    wherever the editor launched it, and an agent driving several checkouts had
+    to shell out through `cd` for each one.
+
+    ``--project`` is the word the rest of the family already uses for "that
+    directory over there", so it is the word here too.  A directory somebody
+    named and got wrong is worth stopping over by name — the alternative is
+    git's own message about the *current* directory, which sends people looking
+    at the wrong path entirely.
+    """
+    start = getattr(args, "project", None) or "."
+    if not os.path.isdir(start):
+        raise GitError("no such directory: {}".format(start))
+    return find_repo_root(start)
+
+
 def _load_file_lines(path):
     """Read a config file and return non-blank, non-comment lines.
 
@@ -204,7 +225,7 @@ def cmd_review(args):
     """agentdiff review — analyse working-tree changes."""
     use_json = getattr(args, "json", False)
     try:
-        repo_root = find_repo_root()
+        repo_root = _resolve_repo_root(args)
     except GitError as e:
         if use_json:
             return _json_error(str(e))
@@ -249,7 +270,7 @@ def cmd_review(args):
 def cmd_scope(args):
     """agentdiff scope GLOB... — persist intended scope to .agentdiff/scope."""
     try:
-        repo_root = find_repo_root()
+        repo_root = _resolve_repo_root(args)
     except GitError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
@@ -312,10 +333,21 @@ def _build_parser():
         description="See what the agent actually changed — before you merge.",
     )
     p.add_argument("--version", action="version", version=f"agentdiff {__version__}")
+    p.add_argument("--project", default=".", metavar="DIR",
+                   help="project directory (default: current directory)")
+
+    # Accepted on either side of the subcommand.  SUPPRESS matters: without it
+    # the subparser's own default would overwrite a --project given before the
+    # subcommand with None, and the flag would silently do nothing there.
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--project", default=argparse.SUPPRESS, metavar="DIR",
+                        help="project directory (default: current directory)")
+
     sub = p.add_subparsers(dest="command", metavar="COMMAND")
 
     # review
-    rev = sub.add_parser("review", help="analyse working-tree changes against HEAD (or --since REF)")
+    rev = sub.add_parser("review", parents=[common],
+                         help="analyse working-tree changes against HEAD (or --since REF)")
     rev.add_argument(
         "--since", metavar="GIT_REF",
         help="compare against this ref instead of HEAD",
@@ -337,11 +369,13 @@ def _build_parser():
     )
 
     # scope
-    sc = sub.add_parser("scope", help="persist intended scope globs to .agentdiff/scope")
+    sc = sub.add_parser("scope", parents=[common],
+                        help="persist intended scope globs to .agentdiff/scope")
     sc.add_argument("globs", nargs="+", metavar="GLOB")
 
     # rules
-    sub.add_parser("rules", help="print every rule and what it flags")
+    sub.add_parser("rules", parents=[common],
+                   help="print every rule and what it flags")
 
     return p
 
