@@ -373,7 +373,21 @@ def main(argv=None):
 
     Taking it as an argument is what lets the tests drive the whole CLI in
     process, rather than only the pieces underneath it.
+
+    Ctrl-c is caught here and nowhere else.  Reviewing a large repository takes
+    a moment, and interrupting a command that is taking longer than you
+    expected is ordinary; answering it with a traceback reads as a crash and
+    sends people looking for a bug they caused on purpose.  130 is the shell's
+    own spelling of "stopped by ctrl-c", and it keeps `agentdiff review && git
+    commit` from committing on a review nobody finished.
     """
+    try:
+        _run(argv)
+    except KeyboardInterrupt:
+        sys.exit(130)
+
+
+def _run(argv=None):
     _write_utf8_if_the_locale_said_nothing()
     parser = _build_parser()
     args = parser.parse_args(argv)
