@@ -220,19 +220,36 @@ def rule_ci_release(change):
 # Rule: dependencies (HIGH)
 # ---------------------------------------------------------------------------
 
-_DEP_GLOBS = [
+# Files a human edits to add a dependency, and the lock files that follow.
+# A manifest missing from this list is never looked at — not flagged, not gated,
+# not mentioned — so a dependency added there passes review silently, which is
+# worse than no review at all, because the gate said yes.
+_PIP_TEXT_GLOBS = [
     "requirements*.txt",
     "requirements/*.txt",
+    "requirements*.in",       # pip-tools source: the file a human actually edits
+    "requirements/*.in",
+    "constraints*.txt",       # pins, which is what a dependency change looks like
+    "constraints/*.txt",
+]
+
+_DEP_GLOBS = _PIP_TEXT_GLOBS + [
     "pyproject.toml",
     "package.json",
     "package-lock.json",
     "go.mod",
+    "go.sum",
     "Cargo.toml",
+    "Cargo.lock",
     "Gemfile",
     "Gemfile.lock",
     "poetry.lock",
+    "uv.lock",
     "yarn.lock",
     "pnpm-lock.yaml",
+    "deno.lock",
+    "bun.lock",
+    "bun.lockb",
     "Pipfile",
     "Pipfile.lock",
     "composer.lock",
@@ -243,8 +260,14 @@ _LOCK_FILES = frozenset({
     "package-lock.json",
     "Gemfile.lock",
     "poetry.lock",
+    "uv.lock",
     "yarn.lock",
     "pnpm-lock.yaml",
+    "deno.lock",
+    "bun.lock",
+    "bun.lockb",
+    "Cargo.lock",
+    "go.sum",
     "Pipfile.lock",
     "composer.lock",
 })
@@ -276,14 +299,20 @@ _CARGO_DEP_SECTION_RE = re.compile(
 _GEMFILE_RE = re.compile(r"gem\s+['\"]([A-Za-z0-9_\-]+)['\"]")
 
 
-def _dep_name_from_line(text, basename):
+def _dep_name_from_line(text, path):
     """Extract a package name from an added dependency file line, or return None.
 
     Only used for files that don't require section-aware parsing (requirements.txt,
     pyproject.toml, go.mod, Gemfile). Cargo.toml, Pipfile, and package.json are
     handled by dedicated helpers in rule_dependencies.
+
+    Takes the whole path, not the basename: `requirements/base.txt` is a
+    requirements file and `base.txt` is nothing in particular, and the directory
+    is the only place that says so.
     """
-    if "requirements" in basename or (basename.endswith(".txt") and "require" in basename):
+    basename = os.path.basename(path)
+
+    if _matches_any(path, _PIP_TEXT_GLOBS):
         line = text.split("#")[0].strip()
         if not line or line.startswith("-") or line.startswith("#"):
             return None
@@ -449,7 +478,7 @@ def rule_dependencies(change):
         findings = []
         seen = set()
         for lineno, text in _added_lines(change.diff_text):
-            name = _dep_name_from_line(text, basename)
+            name = _dep_name_from_line(text, change.path)
             if name and name not in seen:
                 seen.add(name)
                 findings.append(Finding(
@@ -619,9 +648,11 @@ RULE_DOCS = [
     (
         "HIGH", "dependencies",
         "Reports added or version-changed entries in dependency manifests "
-        "(requirements*.txt, pyproject.toml, package.json, package-lock.json, "
-        "go.mod, Cargo.toml, Gemfile, Pipfile) and lock files "
-        "(Gemfile.lock, poetry.lock, yarn.lock, pnpm-lock.yaml, Pipfile.lock, composer.lock). "
+        "(requirements*.txt, requirements*.in, constraints*.txt, pyproject.toml, "
+        "package.json, go.mod, Cargo.toml, Gemfile, Pipfile) and lock files "
+        "(package-lock.json, Gemfile.lock, poetry.lock, uv.lock, yarn.lock, "
+        "pnpm-lock.yaml, deno.lock, bun.lock, bun.lockb, Cargo.lock, go.sum, "
+        "Pipfile.lock, composer.lock). "
         "Reports package name only — no vulnerability data. "
         "For CVE context: github.com/actions/dependency-review-action. "
         "For supply-chain analysis: socket.dev.",

@@ -160,7 +160,7 @@ each domain more deeply.
 |----------|------|-----------------|
 | HIGH | secrets | PEM private key blocks, AWS access key ID patterns, high-entropy tokens assigned to names containing key/token/secret/password |
 | HIGH | ci-release | `.github/workflows/`, Dockerfiles, `*.tf`, `.circleci/`, Jenkinsfile, Makefile release targets, deploy scripts (shell/Python/Ruby/PowerShell — not YAML/JSON data files) |
-| HIGH | dependencies | Added or version-changed packages in requirements.txt, pyproject.toml, package.json, go.mod, Cargo.toml (section-aware), Gemfile, Pipfile. Lock files flagged as modified: package-lock.json, Gemfile.lock, poetry.lock, yarn.lock, pnpm-lock.yaml, Pipfile.lock, composer.lock |
+| HIGH | dependencies | Added or version-changed packages in requirements.txt, requirements.in, constraints.txt, pyproject.toml, package.json, go.mod, Cargo.toml (section-aware), Gemfile, Pipfile. Lock files flagged as modified: package-lock.json, Gemfile.lock, poetry.lock, uv.lock, yarn.lock, pnpm-lock.yaml, deno.lock, bun.lock, bun.lockb, Cargo.lock, go.sum, Pipfile.lock, composer.lock |
 | MED | ignore-config | `.agentdiff/ignore` added or modified. The ignore file is never suppressed by its own patterns — an agent silencing its reviewer is always flagged |
 | MED | out-of-scope | Files changed outside the declared scope (only when scope is set) |
 | MED | deletion | File deleted or more than 50 lines removed from a file |
