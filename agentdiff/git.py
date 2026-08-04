@@ -17,6 +17,21 @@ class GitError(Exception):
 DEFAULT_TIMEOUT = 60
 
 
+def _as_argv(arg):
+    """One argument, in the form git will read it back as.
+
+    Handing git a path means handing the kernel bytes, and the encoding of
+    those bytes is the locale's business — on a machine set to C it is ASCII,
+    and passing back the very path git just gave us raises before git is even
+    started.  On POSIX a filename *is* bytes, so we choose them ourselves and
+    choose the ones git used.  Elsewhere the platform already speaks UTF-8 for
+    paths and there is nothing to work around.
+    """
+    if os.name == "posix" and isinstance(arg, str) and not arg.isascii():
+        return arg.encode("utf-8", "surrogateescape")
+    return arg
+
+
 def _git(args, cwd, timeout=DEFAULT_TIMEOUT):
     """Run git with the given args in cwd. Returns CompletedProcess. Never raises on non-zero.
 
@@ -30,10 +45,17 @@ def _git(args, cwd, timeout=DEFAULT_TIMEOUT):
     """
     try:
         return subprocess.run(
-            ["git", "-c", "core.quotePath=false"] + list(args),
+            [_as_argv(a) for a in
+             ["git", "-c", "core.quotePath=false"] + list(args)],
             cwd=cwd,
             capture_output=True,
             text=True,
+            # git speaks UTF-8 whatever the locale claims, and `text=True`
+            # would otherwise believe the locale: on a machine set to C, one
+            # file named in Japanese makes every git call raise.  `replace`
+            # because a path we cannot decode is still a path worth reporting.
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
     except FileNotFoundError:
