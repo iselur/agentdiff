@@ -39,6 +39,16 @@ def _git(args, cwd, timeout=DEFAULT_TIMEOUT):
     ``"caf\\303\\251.py"``, which is a display form and not a path any of this
     can open.
 
+    It is load-bearing in exactly one place, and that place is easy to miss.
+    Every call that lists paths asks for ``-z``, and NUL-separated output is
+    never quoted whatever this setting says — so dropping it changes nothing
+    there.  ``git diff --summary`` has no ``-z`` form, and that is the call the
+    executable bit is read from (`_parse_exec_added`).  Without this setting a
+    ``chmod +x`` on ``café.py`` is reported against a path that does not exist,
+    while the file that actually changed goes unmentioned: not an error, just a
+    file that quietly looks reviewed.  Keep both — the ``-z`` and this — and see
+    tests/test_a_verdict_on_an_odd_name.py.
+
     A timeout because git is not always fast: a filter driver, a lock held by
     another process, a network remote.  agentdiff runs in pre-commit hooks,
     and a hook that never returns is a hook nobody can get out of.
