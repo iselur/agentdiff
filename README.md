@@ -123,6 +123,11 @@ agentdiff review --staged-only || exit 1
 **`--report FILE`** Write a markdown evidence document to FILE, suitable for
 pasting into a PR description or issue comment.
 
+**`--json`** One JSON object on stdout instead of the report above — the
+findings, the counts, and the file accounting (`files_changed`, `reviewed`,
+`unread`, `clean`) shown earlier. The exit code is the same either way, so a
+script can gate on the code and read the object for the detail.
+
 **Exit codes:** 0 = nothing flagged at gating severity. 1 = one or more
 findings at HIGH or MED (or LOW under --strict), **or a changed file that
 could not be read**. 2 = usage error (not a git repo, unknown ref). 130 =
