@@ -364,6 +364,13 @@ dependencies, MIT, no API key, nothing leaves your machine. None of them
 call a model — that is the point, since the thing being checked already is
 one.
 
+Each of those four claims is a test rather than a promise, in
+`tests/test_family_claims.py`: every import resolves to the standard library or
+to this package, nothing that can open a socket is imported, no environment
+variable that looks like a credential is read, and no model SDK or provider
+hostname appears anywhere. A claim repeated in five READMEs and checked in none
+of them would read as five agreements when it was one assertion.
+
 - [stillworks](https://github.com/iselur/stillworks) — record what your code does now, catch when it changes later
 - [agentdiff](https://github.com/iselur/agentdiff) — see what the agent actually changed, before you merge  ← you are here
 - [agentlog](https://github.com/iselur/agentlog) — what did your coding agent actually do today?
