@@ -112,7 +112,8 @@ def _ref_exists(repo_root, ref):
 class FileChange:
     """One path that differs from the comparison ref."""
 
-    __slots__ = ("status", "path", "old_path", "diff_text", "is_binary", "new_exec")
+    __slots__ = ("status", "path", "old_path", "diff_text", "is_binary",
+                 "new_exec", "unread")
 
     def __init__(self, status, path, old_path=None):
         self.status = status     # A added, M modified, D deleted, R renamed, U untracked
@@ -121,6 +122,11 @@ class FileChange:
         self.diff_text = ""      # unified diff or "+lines" for untracked files
         self.is_binary = False
         self.new_exec = False    # executable bit was added
+        # Why this file's contents never arrived, or "" if they did.  An empty
+        # ``diff_text`` otherwise means "nothing was added", which is what a
+        # file that could not be opened used to look like — and the rules then
+        # found nothing in it, correctly, about nothing.
+        self.unread = ""
 
 
 def get_changes(repo_root, since_ref="HEAD", staged_only=False):
@@ -259,20 +265,27 @@ def _read_as_added(fc, full_path):
     """
     try:
         st = os.lstat(full_path)
-    except OSError:
+    except OSError as exc:
+        fc.unread = str(exc)
         return
     if not stat.S_ISREG(st.st_mode):
+        fc.unread = "not a regular file"
         return
     try:
         with open(full_path, "rb") as f:
             raw = f.read(8192)
         if b"\x00" in raw:
+            # Opened, and we know what it is: there is a rule about binaries
+            # being added.  Not the same as not knowing anything about it.
             fc.is_binary = True
             return
         with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
             fc.diff_text = "".join(f"+{line}\n" for line in fh.read().splitlines())
-    except OSError:
-        pass
+    except OSError as exc:
+        # Returning quietly here handed the rules an empty file.  They then
+        # flagged nothing, which the run reported as `clean` — a verdict about
+        # contents nobody ever saw.
+        fc.unread = str(exc)
 
 
 def _parse_exec_added(summary_text):

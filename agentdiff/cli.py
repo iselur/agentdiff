@@ -6,7 +6,8 @@ Commands:
   agentdiff scope    persist intended scope globs
   agentdiff rules    print every rule and what it flags
 
-Exit codes: 0 = clean, 1 = findings at gating severity, 2 = usage/error.
+Exit codes: 0 = clean, 1 = findings at gating severity or a changed file
+that could not be read, 2 = usage/error.
 """
 
 import argparse
@@ -180,6 +181,35 @@ def _nothing_reviewed_line(since_ref, staged_only):
     return ("no changes against {}, so nothing was reviewed".format(since_ref))
 
 
+def _unread_changes(changes):
+    """The changed files whose contents never arrived, one entry per path.
+
+    Deduplicated on the path because a rename produces two entries for what is
+    one file on disk, and naming it twice would read as two problems.
+    """
+    seen = {}
+    for c in changes:
+        if c.unread and c.path not in seen:
+            seen[c.path] = c.unread
+    return sorted(seen.items())
+
+
+def _unread_lines(unread):
+    """The block that names files nothing could be read from.
+
+    Always names them.  There are rarely more than one or two, and the fix is a
+    chmod on a specific path or a line in `.agentdiff/ignore` — a count on its
+    own is not something anybody can act on.
+    """
+    if not unread:
+        return []
+    n = len(unread)
+    head = "{} changed file(s) could not be read, so {} not reviewed".format(
+        n, "it was" if n == 1 else "they were")
+    return [head] + ["  {}  ({})".format(_safe(p), _safe(why))
+                     for p, why in unread]
+
+
 def _print_review(findings, changes, strict, out=None,
                   since_ref="HEAD", staged_only=False):
     """Print human-readable review output. Returns the appropriate exit code."""
@@ -187,6 +217,8 @@ def _print_review(findings, changes, strict, out=None,
         out = sys.stdout
 
     n_files = len(set(c.path for c in changes))
+    unread = _unread_changes(changes)
+    n_reviewed = n_files - len(unread)
     gating = gating_findings(findings, strict=strict)
 
     if not changes:
@@ -198,6 +230,16 @@ def _print_review(findings, changes, strict, out=None,
         return 0
 
     if not findings:
+        if unread:
+            # Not `clean`, and not exit 0.  Nothing was flagged, but something
+            # was never looked at, and exit 0 is what `agentdiff review && git
+            # commit` acts on — the README's own reasoning about interrupted
+            # runs, applied one file at a time.
+            print("{} of {} changed file(s) reviewed, nothing flagged".format(
+                n_reviewed, n_files), file=out)
+            for line in _unread_lines(unread):
+                print(line, file=out)
+            return 1
         print(f"clean: {n_files} file(s) changed, nothing flagged", file=out)
         return 0
 
@@ -216,10 +258,17 @@ def _print_review(findings, changes, strict, out=None,
 
     if gating:
         print(f"\n{total} finding(s): {count_str} — review before merge", file=out)
-        return 1
     else:
         print(f"\n{total} finding(s): {count_str} — LOW only, pass --strict to gate on LOW", file=out)
-        return 0
+
+    if unread:
+        # After the findings, because the findings are what was asked for.  It
+        # still turns a LOW-only run into a gating one: the file nobody could
+        # open is the one place a HIGH could be hiding.
+        for line in _unread_lines(unread):
+            print(line, file=out)
+        return 1
+    return 1 if gating else 0
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +277,7 @@ def _print_review(findings, changes, strict, out=None,
 
 def _print_review_json(findings, changes, strict):
     gating = gating_findings(findings, strict=strict)
+    unread = _unread_changes(changes)
     data = {
         "findings": [
             {
@@ -244,13 +294,16 @@ def _print_review_json(findings, changes, strict):
         # nothing was flagged, which is also true of a review that examined
         # nothing, and `clean` is the field a CI script reads to decide whether
         # to merge.  A script can now tell the two apart.
-        "reviewed": len(set(c.path for c in changes)),
-        "clean": len(findings) == 0,
+        "reviewed": len(set(c.path for c in changes)) - len(unread),
+        # `clean` is false while any changed file went unread, because a
+        # verdict on contents nobody saw is not a verdict.
+        "clean": len(findings) == 0 and not unread,
+        "unread": [{"file": p, "reason": why} for p, why in unread],
         "gate_triggered": len(gating) > 0,
         "counts": {s: sum(1 for f in findings if f.severity == s) for s in SEVERITY},
     }
     print(json.dumps(data, indent=2))
-    return 1 if gating else 0
+    return 1 if (gating or unread) else 0
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +312,7 @@ def _print_review_json(findings, changes, strict):
 
 def _write_report(findings, changes, since_ref, report_path):
     n_files = len(set(c.path for c in changes))
+    unread = _unread_changes(changes)
     by_sev = {s: [f for f in findings if f.severity == s] for s in SEVERITY}
 
     lines = [
@@ -284,8 +338,16 @@ def _write_report(findings, changes, since_ref, report_path):
         # Same distinction as the review line: this report is the evidence
         # somebody keeps, and "nothing flagged" reads as a review that passed.
         lines += ["_No changes to review — nothing was examined._", ""]
-    elif not findings:
+    elif not findings and not unread:
         lines += ["_Nothing flagged._", ""]
+
+    if unread:
+        # The report outlives the terminal it was made in, so the gap in it has
+        # to be written down next to the findings rather than only shouted once.
+        lines += ["## Not reviewed ({})".format(len(unread)), ""]
+        lines += ["- **{}** — could not be read ({})".format(_safe(p_), _safe(w))
+                  for p_, w in unread]
+        lines.append("")
 
     with open(report_path, "w") as fh:
         fh.write("\n".join(lines) + "\n")

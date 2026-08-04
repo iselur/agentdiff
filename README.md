@@ -73,10 +73,17 @@ here for width; the real output is indented:
   "files_changed": 3,
   "reviewed": 3,
   "clean": false,
+  "unread": [],
   "gate_triggered": true,
   "counts": {"HIGH": 2, "MED": 2, "LOW": 1}
 }
 ```
+
+`reviewed` is how many of `files_changed` were actually opened, and `unread`
+names the rest — `[{"file": "bad.py", "reason": "[Errno 13] Permission
+denied: ..."}]`. `clean` is false whenever `unread` is non-empty, because a
+verdict on contents nobody read is not a verdict; that is the field a CI
+script acts on, so it is the one that has to be conservative.
 
 ---
 
@@ -116,13 +123,31 @@ agentdiff review --staged-only || exit 1
 pasting into a PR description or issue comment.
 
 **Exit codes:** 0 = nothing flagged at gating severity. 1 = one or more
-findings at HIGH or MED (or LOW under --strict). 2 = usage error (not a git
-repo, unknown ref). 130 = stopped by ctrl-c. 141 = the reader hung up
-(`agentdiff review | head`, or `| less` quit with `q`).
+findings at HIGH or MED (or LOW under --strict), **or a changed file that
+could not be read**. 2 = usage error (not a git repo, unknown ref). 130 =
+stopped by ctrl-c. 141 = the reader hung up (`agentdiff review | head`, or
+`| less` quit with `q`).
 
-The last two are deliberately neither 0 nor 1. A review that was
+130 and 141 are deliberately neither 0 nor 1. A review that was
 interrupted or cut off found nothing *and* cleared nothing, and
 `agentdiff review && git commit` must not read that as a pass.
+
+An unreadable changed file is the same reasoning applied to one file, so it
+lands on 1 rather than a code of its own: something in the diff was never
+examined, and a human has to look. Only untracked and newly added files
+reach it — a *tracked* file that cannot be read stops `git diff` first, and
+that is already exit 2 with git's own message. The file is always named, so
+the fix is a `chmod` on a path or a line in `.agentdiff/ignore`:
+
+```
+1 of 2 changed file(s) reviewed, nothing flagged
+1 changed file(s) could not be read, so it was not reviewed
+  bad.py  ([Errno 13] Permission denied: '/repo/bad.py')
+```
+
+Without this, one permission bit was the whole difference between `HIGH
+bad.py:1 AWS access key ID pattern added` and `clean: 1 file(s) changed,
+nothing flagged` — with exit 0, and the file counted in the total.
 
 ---
 
