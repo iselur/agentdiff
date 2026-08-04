@@ -116,7 +116,12 @@ pasting into a PR description or issue comment.
 
 **Exit codes:** 0 = nothing flagged at gating severity. 1 = one or more
 findings at HIGH or MED (or LOW under --strict). 2 = usage error (not a git
-repo, unknown ref).
+repo, unknown ref). 130 = stopped by ctrl-c. 141 = the reader hung up
+(`agentdiff review | head`, or `| less` quit with `q`).
+
+The last two are deliberately neither 0 nor 1. A review that was
+interrupted or cut off found nothing *and* cleared nothing, and
+`agentdiff review && git commit` must not read that as a pass.
 
 ---
 
