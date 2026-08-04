@@ -245,6 +245,14 @@ before a commit or PR exists, with zero configuration and zero dependencies.
   tradeoff is near-zero false positives; do not rely on this rule alone for
   secrets hygiene.
 
+- **A path that cannot be printed is shown the way git shows it.** Filenames
+  come out of the tree the agent changed, and on Unix one can contain a
+  newline, a tab, or a terminal escape sequence. Those are escaped and the path
+  is quoted — `"deps\nHIGH/requirements.txt"` — exactly as `git status` prints
+  it, so a filename can never write its own finding row and the path you read
+  is one you can act on. `--json` always carries the real path, unescaped, for
+  whatever consumes it.
+
 - **Scope globs use Python fnmatch, not gitignore semantics.** A glob like
   `src/**` matches files with a literal `src/` prefix in fnmatch but may
   not behave identically to gitignore patterns in all cases. Test your globs

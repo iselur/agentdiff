@@ -82,6 +82,20 @@ def _load_ignore(repo_root):
 _SEV_PAD = {"HIGH": "HIGH ", "MED": "MED  ", "LOW": "LOW  "}
 
 
+_HIDDEN = ("Cc", "Cf", "Zl", "Zp")
+
+_ESCAPES = {"\a": "\\a", "\b": "\\b", "\t": "\\t", "\n": "\\n",
+            "\v": "\\v", "\f": "\\f", "\r": "\\r"}
+
+
+def _escape(char):
+    """One character that cannot be shown, written so it can be read."""
+    if char in _ESCAPES:
+        return _ESCAPES[char]
+    n = ord(char)
+    return "\\x{:02x}".format(n) if n < 0x100 else "\\u{:04x}".format(n)
+
+
 def _safe(text):
     """A path that cannot do anything to the page it is printed on.
 
@@ -90,20 +104,57 @@ def _safe(text):
     sequence there clears the screen or retitles the window as the review is
     read, and a right-to-left override makes the line name a different file
     from the one that changed — which is the one failure a review cannot
-    afford.  So the control characters (Cc), the formatting characters (Cf,
-    where the bidi overrides live) and the two separators that read as a line
-    break go.
+    afford.  A raw newline is worse still: `--name-status -z` hands paths over
+    exactly as they are on disk, so a directory named with one would end the
+    row and start another that looks just like a finding.
+
+    These used to be deleted, which is safe and silent and leaves the line
+    naming a file that is not there:
+
+        HIGH   depsHIGH   forged.py   x/requirements.txt:1  dependency changed
+
+    `deps` and `HIGH   forged.py   x` were two components of a real path.  On
+    screen they are one word, there is no `depsHIGH` on disk, and nothing says
+    anything was dropped — so the gate says review this file before merge and
+    the file cannot be found.
+
+    So they are escaped rather than dropped, and the path is quoted when any of
+    them is, which is what git itself does and what `git status` shows.  The
+    quoting is what makes the escaping mean something: without it a file named
+    `a\\nb` and a file named `a<newline>b` print identically.  Escapes match
+    git's for the ones anybody meets (`\\n`, `\\t`, `\\r`); rarer characters
+    get `\\xNN` or `\\uNNNN` rather than git's octal, because this is a Python
+    tool and a reader is likelier to know what those mean.
+
+    A backslash or a double quote in an otherwise ordinary name gets the same
+    treatment, for the same reason and again exactly as git does: a file named
+    `a\\nb` on disk has to look different from a file named `a<newline>b`, and
+    it is the quoting that tells them apart.
+
+    Printable paths with neither are returned untouched — `café/naïve.py` is
+    perfectly readable and quoting it would be noise.
 
     The JSON view is left alone: it is consumed by another program, which wants
     the path that is really on disk, and JSON's own escaping already makes it
     safe to print.
     """
     text = str(text)
-    if text.isprintable():
+    if text.isprintable() and '"' not in text and "\\" not in text:
         return text                     # the overwhelmingly common case
-    return "".join(
-        "" if unicodedata.category(c) in ("Cc", "Cf", "Zl", "Zp") else c
-        for c in text)
+    if not any(c in '"\\' or unicodedata.category(c) in _HIDDEN for c in text):
+        # Unprintable for some other reason — an unassigned or private-use
+        # codepoint.  It cannot break the row or drive the terminal, so it is
+        # left as it is, as it always was.
+        return text
+    out = []
+    for c in text:
+        if unicodedata.category(c) in _HIDDEN:
+            out.append(_escape(c))
+        elif c in '"\\':
+            out.append("\\" + c)
+        else:
+            out.append(c)
+    return '"' + "".join(out) + '"'
 
 
 def _fmt_finding(f):
