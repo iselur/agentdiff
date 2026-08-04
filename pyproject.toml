@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentdiff-cli"
-version = "0.1.1"
+version = "0.1.2"
 description = "Deterministic triage of an AI agent's changes — see what it actually touched before you merge."
 readme = "README.md"
 license = { text = "MIT" }

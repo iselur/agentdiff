@@ -178,8 +178,13 @@ class TestVersionCommand(unittest.TestCase):
         shutil.rmtree(self.repo, ignore_errors=True)
 
     def test_version_flag(self):
+        # Against __version__ rather than a literal: pinning the number here
+        # means every release starts with a red suite for no reason, which is
+        # how this test came to be asserting 0.1.0 in a 0.1.1 tree.
+        from agentdiff import __version__
         out, _, code = _run_cmd(["--version"], cwd=self.repo)
-        self.assertIn("0.1.0", out)
+        self.assertIn(__version__, out)
+        self.assertEqual(code, 0)
 
 
 class TestJsonOnError(unittest.TestCase):

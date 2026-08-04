@@ -11,6 +11,7 @@ Exit codes are the contract: 0 clean, 1 findings, 2 usage or environment error.
 from __future__ import annotations
 
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -23,7 +24,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from agentdiff.cli import main
 from agentdiff import git as _git
 
-from .helpers import make_repo, write_file
+from tests.helpers import make_repo, write_file
 
 
 class HostileRepoCase(unittest.TestCase):
@@ -269,6 +270,72 @@ class TestRepoWithNoCommits(unittest.TestCase):
         write_file(self.repo, "new.py", "x = 1\n")
         changes = _git.get_changes(self.repo, since_ref="HEAD")
         self.assertEqual([c.path for c in changes], ["new.py"])
+
+
+class TestOutputCannotDriveTheTerminal(HostileRepoCase):
+    """A path in a review is text somebody else chose to put in the tree.
+
+    agentdiff prints the path of every file it flags, and the whole point of
+    that line is to tell you which file to go and look at.  An escape sequence
+    in the path clears the screen or retitles the window as it is printed, and
+    a right-to-left override makes it name a different file from the one that
+    changed — which is the one failure this tool cannot afford, because a
+    review is read to decide whether to merge.
+    """
+
+    # Assembled from chr() so this file stays printable.
+    ESC, BEL, RLO = chr(27), chr(7), chr(0x202E)
+    NASTY = (
+        ESC + "[2J" + ESC + "[H",       # clear the screen
+        ESC + "]0;pwned" + BEL,         # retitle the window
+        ESC + "[31m",                   # colour everything after this
+        RLO,                            # right-to-left override
+        chr(127),                       # delete
+    )
+
+    def assertPrintable(self, out, nasty, what):
+        for char in out:
+            if char in "\n\t":
+                continue                # the layout's own whitespace
+            self.assertFalse(
+                ord(char) < 32 or ord(char) == 127,
+                "control character {!r} reached the terminal from {!r} via {}"
+                .format(char, nasty, what))
+        self.assertNotIn(self.RLO, out, what)
+
+    def test_a_flagged_path_cannot_carry_an_escape_to_the_terminal(self):
+        # The rule matches on the basename, so the payload goes in the
+        # directory: an agent that can add a file can add the directory too.
+        for nasty in self.NASTY:
+            name = "dir" + nasty + "x"
+            try:
+                write_file(self.repo, name + "/Dockerfile", "FROM python:3.11\n")
+            except (OSError, ValueError) as exc:
+                self.skipTest("filesystem refuses this name: {}".format(exc))
+            code, out, err = self.run_cli("review")
+            self.assertNoCrash(code, err)
+            self.assertEqual(code, 1, "the Dockerfile should still be flagged")
+            self.assertPrintable(out, nasty, "review")
+
+    def test_the_path_is_still_recognisable_once_stripped(self):
+        # Stripping must not eat the path, or the line is safe and useless at
+        # the same time.
+        write_file(self.repo, "keep" + self.ESC + "[2Jme/Dockerfile",
+                   "FROM python:3.11\n")
+        code, out, err = self.run_cli("review")
+        self.assertNoCrash(code, err)
+        self.assertIn("me/Dockerfile", out)
+        self.assertIn("keep", out)
+
+    def test_json_keeps_the_bytes_because_it_is_not_a_terminal(self):
+        # --json is consumed by another program, which wants the path that is
+        # really on disk; JSON's own escaping makes it safe to print.
+        write_file(self.repo, "dir" + self.ESC + "[2J/Dockerfile",
+                   "FROM python:3.11\n")
+        code, out, err = self.run_cli("review", "--json")
+        self.assertNoCrash(code, err)
+        json.loads(out)                         # still valid JSON
+        self.assertIn("\\u001b", out)
 
 
 if __name__ == "__main__":

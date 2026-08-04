@@ -13,6 +13,7 @@ import argparse
 import json
 import os
 import sys
+import unicodedata
 
 from . import __version__
 from .git import find_repo_root, get_changes, GitError
@@ -59,9 +60,33 @@ def _load_ignore(repo_root):
 _SEV_PAD = {"HIGH": "HIGH ", "MED": "MED  ", "LOW": "LOW  "}
 
 
+def _safe(text):
+    """A path that cannot do anything to the page it is printed on.
+
+    Every line of a review exists to say which file to go and look at, and the
+    path in it was put in the tree by whoever changed the tree.  An escape
+    sequence there clears the screen or retitles the window as the review is
+    read, and a right-to-left override makes the line name a different file
+    from the one that changed — which is the one failure a review cannot
+    afford.  So the control characters (Cc), the formatting characters (Cf,
+    where the bidi overrides live) and the two separators that read as a line
+    break go.
+
+    The JSON view is left alone: it is consumed by another program, which wants
+    the path that is really on disk, and JSON's own escaping already makes it
+    safe to print.
+    """
+    text = str(text)
+    if text.isprintable():
+        return text                     # the overwhelmingly common case
+    return "".join(
+        "" if unicodedata.category(c) in ("Cc", "Cf", "Zl", "Zp") else c
+        for c in text)
+
+
 def _fmt_finding(f):
-    loc = f"{f.file}:{f.line}" if f.line else f.file
-    return f"  {_SEV_PAD.get(f.severity, f.severity)}  {loc}  {f.reason}"
+    loc = f"{_safe(f.file)}:{f.line}" if f.line else _safe(f.file)
+    return f"  {_SEV_PAD.get(f.severity, f.severity)}  {loc}  {_safe(f.reason)}"
 
 
 def _print_review(findings, changes, strict, out=None):
@@ -146,8 +171,8 @@ def _write_report(findings, changes, since_ref, report_path):
             continue
         lines += [f"## {sev} ({len(group)})", ""]
         for f in group:
-            loc = f"{f.file}:{f.line}" if f.line else f.file
-            lines.append(f"- **{loc}** — {f.reason}")
+            loc = f"{_safe(f.file)}:{f.line}" if f.line else _safe(f.file)
+            lines.append(f"- **{loc}** — {_safe(f.reason)}")
         lines.append("")
 
     if not findings:
