@@ -34,9 +34,10 @@ README = os.path.join(_ROOT, "README.md")
 # The tool this repository is, as the roster spells it.
 THIS_ONE = "agentdiff"
 
-# The one tool that can install the others, and the extra that does it.
+# The one command that installs the family, since stillworks 0.2.0 all of it
+# at once — the 0.1.x extra `'stillworks[all]'` is retired.
 INSTALLER = "stillworks"
-INSTALL_LINE = "pip install 'stillworks[all]'"
+INSTALL_LINE = "pip install stillworks"
 
 HEADING = "## Part of a small family"
 MARKER = "← you are here"

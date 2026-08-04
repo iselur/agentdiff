@@ -19,8 +19,7 @@ characterization testing.
 ## 30-second quickstart
 
 ```bash
-pip install 'stillworks[all]'   # all five agent tools, including this one
-pip install agentdiff-cli       # or just this one (the command is `agentdiff`)
+pip install stillworks   # one install, all five agent tools, including this one
 
 # Inside any git repo, after an agent session:
 agentdiff review
@@ -360,11 +359,12 @@ before a commit or PR exists, with zero configuration and zero dependencies.
 ## Installation
 
 ```bash
-pip install agentdiff-cli
+pip install stillworks   # one install, all five agent tools, including this one
 ```
 
-(The PyPI name is `agentdiff-cli` because `agent-diff` was already taken. The
-command, the module, and the repo are all just `agentdiff`.)
+(Since stillworks 0.2.0 the whole family ships in one wheel. The command, the
+module, and the repo are all just `agentdiff`; the old standalone PyPI name
+`agentdiff-cli` is the 0.1.x era and gets no further releases.)
 
 Or run it straight from a checkout, no install needed — it is stdlib only:
 
@@ -398,7 +398,7 @@ of them would read as five agreements when it was one assertion.
 One install gets all five, and `stillworks tools` says which ones you have:
 
 ```sh
-pip install 'stillworks[all]'
+pip install stillworks
 stillworks tools
 ```
 
