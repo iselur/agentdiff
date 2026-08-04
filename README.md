@@ -19,7 +19,7 @@ characterization testing.
 ## 30-second quickstart
 
 ```bash
-pip install 'stillworks[all]'   # all four agent tools, including this one
+pip install 'stillworks[all]'   # all five agent tools, including this one
 pip install agentdiff-cli       # or just this one (the command is `agentdiff`)
 
 # Inside any git repo, after an agent session:
@@ -58,7 +58,8 @@ LOW (1)
 5 finding(s): 2 HIGH, 2 MED, 1 LOW — review before merge
 ```
 
-Exit code is 1 (findings at HIGH or MED). With `--json`:
+Exit code is 1 (findings at HIGH or MED). With `--json` — one finding per line
+here for width; the real output is indented:
 
 ```json
 {

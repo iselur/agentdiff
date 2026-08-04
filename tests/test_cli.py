@@ -74,6 +74,26 @@ class TestReviewFindings(unittest.TestCase):
         self.assertFalse(data["clean"])
         self.assertEqual(code, 1)
 
+    def test_json_shape_matches_the_readme(self):
+        # The README prints a whole object, so anyone writing a CI script reads
+        # it as the contract.  A key added here and not there is a promise
+        # quietly broken; a key shown there and dropped here is worse.
+        import re
+        write_file(self.repo, "requirements.txt", "requests==2.31.0\n")
+        stage_file(self.repo, "requirements.txt")
+        out, _, _ = _run_cmd(["review", "--json"], cwd=self.repo)
+        real = json.loads(out)
+        readme = open(os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "README.md")).read()
+        block = re.search(r"```json\n(\{.*?\n\})\n```", readme, re.S)
+        self.assertIsNotNone(block, "the README no longer shows --json output")
+        shown = json.loads(block.group(1))
+        self.assertEqual(sorted(shown), sorted(real))
+        self.assertEqual(sorted(shown["findings"][0]),
+                         sorted(real["findings"][0]))
+        self.assertEqual(sorted(shown["counts"]), sorted(real["counts"]))
+
     def test_json_clean_output(self):
         out, _, code = _run_cmd(["review", "--json"], cwd=self.repo)
         data = json.loads(out)
