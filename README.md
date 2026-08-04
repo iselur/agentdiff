@@ -293,16 +293,18 @@ Requires Python 3.9+, git in PATH. Zero third-party dependencies.
 
 ## Part of a small family
 
-Four tools for working with coding agents, same house style: zero dependencies,
-MIT, no API key, nothing leaves your machine. None of them call a model — that is
-the point, since the thing being checked already is one.
+Five tools for working with coding agents, same house style: zero
+dependencies, MIT, no API key, nothing leaves your machine. None of them
+call a model — that is the point, since the thing being checked already is
+one.
 
 - [stillworks](https://github.com/iselur/stillworks) — record what your code does now, catch when it changes later
 - [agentdiff](https://github.com/iselur/agentdiff) — see what the agent actually changed, before you merge  ← you are here
 - [agentlog](https://github.com/iselur/agentlog) — what did your coding agent actually do today?
+- [agentwatch](https://github.com/iselur/agentwatch) — tail what your agent is doing, right now
 - [unedit](https://github.com/iselur/unedit) — a safety net for letting an agent loose on your files
 
-One install gets all four, and `stillworks tools` says which ones you have:
+One install gets all five, and `stillworks tools` says which ones you have:
 
 ```sh
 pip install 'stillworks[all]'
