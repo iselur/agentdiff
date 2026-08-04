@@ -145,6 +145,18 @@ the fix is a `chmod` on a path or a line in `.agentdiff/ignore`:
   bad.py  ([Errno 13] Permission denied: '/repo/bad.py')
 ```
 
+`--json` carries the same run, so a CI script can tell "nothing flagged" apart
+from "nothing looked at" without parsing the text above:
+
+```
+{
+  "files_changed": 2,
+  "reviewed": 1,
+  "clean": false,
+  "unread": [{"file": "bad.py", "reason": "[Errno 13] Permission denied: '/repo/bad.py'"}]
+}
+```
+
 Without this, one permission bit was the whole difference between `HIGH
 bad.py:1 AWS access key ID pattern added` and `clean: 1 file(s) changed,
 nothing flagged` — with exit 0, and the file counted in the total.
