@@ -280,6 +280,14 @@ before a commit or PR exists, with zero configuration and zero dependencies.
   files in the same changeset that match `**` are still suppressed by the
   updated ignore list. The MED finding is the signal to investigate manually.
 
+- **A git that cannot answer is an error, not a clean tree.** Every listing this
+  tool does goes through git, and `clean: 0 file(s) changed` is also what an
+  empty answer looks like. If git fails — an unreadable `.git/index`, a lock
+  held by something else, a filter driver that broke — agentdiff says which
+  call failed and exits 2. It will not exit 0 on a repository it could not
+  read, because on the `--staged-only` pre-commit path that is a gate opening
+  for changes nobody looked at.
+
 - **No Windows path support.** The tool assumes POSIX paths throughout.
   Contributions welcome.
 

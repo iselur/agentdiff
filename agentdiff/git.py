@@ -65,6 +65,24 @@ def _git(args, cwd, timeout=DEFAULT_TIMEOUT):
             "git took longer than {}s to answer: {}".format(timeout, " ".join(args[:2])))
 
 
+def _must_have_worked(result, what):
+    """Refuse to read a failed git call's empty output as an answer.
+
+    `review` is a gate, and its quiet result -- "clean: 0 file(s) changed" --
+    is also what an empty list looks like.  Each of these calls used to be
+    guarded with `if returncode == 0:` and no else, so a git that could not
+    read the index, or the working tree, or one file's diff, produced nothing
+    and nothing was reported as clean.  Exit 0.  On the pre-commit path, with
+    the change staged the whole time.
+
+    Nothing found is a finding.  Nothing readable is not, and this is the
+    difference between the two.
+    """
+    if result.returncode != 0:
+        detail = (result.stderr or "").strip() or "exit {}".format(result.returncode)
+        raise GitError("{} failed: {}".format(what, detail))
+
+
 def _split_z(text):
     """Fields from git's ``-z`` output.
 
@@ -155,15 +173,19 @@ def get_changes(repo_root, since_ref="HEAD", staged_only=False):
     # 2. Untracked files (working-tree mode only)
     if not staged_only:
         r2 = _git(["ls-files", "--others", "--exclude-standard", "-z"], cwd=repo_root)
-        if r2.returncode == 0:
-            for p in _split_z(r2.stdout):
-                if p and p not in seen:
-                    changes.append(FileChange("U", p))
-                    seen.add(p)
+        _must_have_worked(r2, "git ls-files")
+        for p in _split_z(r2.stdout):
+            if p and p not in seen:
+                changes.append(FileChange("U", p))
+                seen.add(p)
 
     # 3. Executable-bit additions from diff summary
     r_sum = _git(["diff"] + cache + ["--summary", since_ref], cwd=repo_root)
-    exec_set = _parse_exec_added(r_sum.stdout if r_sum.returncode == 0 else "")
+    # A failure here used to fall back to an empty set, which quietly drops the
+    # "this file became executable" flag -- one of the things review exists to
+    # raise.  A missing flag looks exactly like nothing to flag.
+    _must_have_worked(r_sum, "git diff --summary")
+    exec_set = _parse_exec_added(r_sum.stdout)
 
     # 4. Fill diff_text, is_binary, new_exec
     for fc in changes:
@@ -193,23 +215,23 @@ def _new_repo_changes(repo_root, staged_only=False):
 
     # Staged files (git add-ed but not yet committed)
     r = _git(["ls-files", "--cached", "-z"], cwd=repo_root)
-    if r.returncode == 0:
-        for p in _split_z(r.stdout):
-            fc = FileChange("A", p)
-            _read_as_added(fc, os.path.join(repo_root, p))
-            changes.append(fc)
-            seen.add(p)
+    _must_have_worked(r, "git ls-files")
+    for p in _split_z(r.stdout):
+        fc = FileChange("A", p)
+        _read_as_added(fc, os.path.join(repo_root, p))
+        changes.append(fc)
+        seen.add(p)
 
     # Untracked files (not staged, not ignored)
     if not staged_only:
         r2 = _git(["ls-files", "--others", "--exclude-standard", "-z"], cwd=repo_root)
-        if r2.returncode == 0:
-            for p in _split_z(r2.stdout):
-                if p not in seen:
-                    fc = FileChange("U", p)
-                    _read_as_added(fc, os.path.join(repo_root, p))
-                    changes.append(fc)
-                    seen.add(p)
+        _must_have_worked(r2, "git ls-files")
+        for p in _split_z(r2.stdout):
+            if p not in seen:
+                fc = FileChange("U", p)
+                _read_as_added(fc, os.path.join(repo_root, p))
+                changes.append(fc)
+                seen.add(p)
 
     return changes
 
@@ -219,11 +241,13 @@ def _fill_diff(fc, repo_root, since_ref, cache):
         _read_as_added(fc, os.path.join(repo_root, fc.path))
         return
     r = _git(["diff"] + cache + [since_ref, "--", fc.path], cwd=repo_root)
-    if r.returncode == 0:
-        fc.diff_text = r.stdout
-        if "Binary files " in fc.diff_text:
-            fc.is_binary = True
-            fc.diff_text = ""
+    # An empty diff_text on a file we have already said changed is a file
+    # reviewed as having changed nothing -- every rule reads this text.
+    _must_have_worked(r, "git diff")
+    fc.diff_text = r.stdout
+    if "Binary files " in fc.diff_text:
+        fc.is_binary = True
+        fc.diff_text = ""
 
 
 def _read_as_added(fc, full_path):
