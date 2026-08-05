@@ -195,6 +195,12 @@ Both live in `.agentdiff/` at the repo root.
 **`.agentdiff/scope`** — one glob per line, `#` comments. Written by
 `agentdiff scope`. Lists the paths the agent was authorized to touch.
 
+`agentdiff scope` refuses a glob that would not read back as itself — one
+starting with `#`, one padded with a space, one containing a newline — and
+saves nothing. Stored as written, each of those reads back narrower than what
+was asked for, or as no scope at all, and a review with no scope declared is
+green on every file in the repository.
+
 **`.agentdiff/ignore`** — one glob per line, `#` comments. Files matching
 these globs are skipped by all rules. Useful for vendored code, test fixtures,
 or generated files you don't want reviewed.
