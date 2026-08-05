@@ -48,10 +48,7 @@ class HostileRepoCase(unittest.TestCase):
     def run_cli(self, *argv):
         out, err = io.StringIO(), io.StringIO()
         with redirect_stdout(out), redirect_stderr(err):
-            try:
-                code = main(list(argv))
-            except SystemExit as exit_:
-                code = exit_.code if isinstance(exit_.code, int) else 2
+            code = main(list(argv))
         return code, out.getvalue(), err.getvalue()
 
     def assertNoCrash(self, code, err):

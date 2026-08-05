@@ -44,11 +44,8 @@ class TestCtrlC(unittest.TestCase):
     def _code_for(self, args):
         out, err = io.StringIO(), io.StringIO()
         with redirect_stdout(out), redirect_stderr(err):
-            try:
-                cli.main(args)
-            except SystemExit as exc:
-                return exc.code, out.getvalue() + err.getvalue()
-        return 0, out.getvalue() + err.getvalue()
+            code = cli.main(args)
+        return code, out.getvalue() + err.getvalue()
 
     def test_it_does_not_report_a_clean_review(self):
         # The one that matters in front of a commit: an abandoned review is
@@ -68,15 +65,21 @@ class TestCtrlC(unittest.TestCase):
         self.assertEqual(code, 130)
 
     def test_the_real_command_line_agrees(self):
-        # In process is where the assertion is precise; this is here to catch a
-        # guard that exists in `main` but is bypassed by the module entry point.
+        # In process is where the assertion is precise; this one runs the module
+        # entry point for real, because that is where the guard gets bypassed.
+        # `main` hands its code back now instead of raising it, so a
+        # `__main__.py` that calls `main()` and drops the answer exits 0 no
+        # matter what happened -- and that is not hypothetical, one of the five
+        # was written that way.
         env = dict(os.environ, PYTHONPATH=_ROOT)
         proc = subprocess.Popen(
             [sys.executable, "-c",
+             "import runpy, sys;"
              "from agentdiff import cli;"
              "cli.cmd_review = lambda *a, **k: (_ for _ in ()).throw("
              "KeyboardInterrupt());"
-             "cli.main(['review'])"],
+             "sys.argv = ['agentdiff', 'review'];"
+             "runpy.run_module('agentdiff', run_name='__main__')"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=_ROOT)
         _, err = proc.communicate(timeout=60)
         self.assertEqual(proc.returncode, 130, err.decode("utf-8", "replace"))
