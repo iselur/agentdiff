@@ -39,7 +39,7 @@ import unittest
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
-from agentdiff.cli import _safe
+from agentdiff.terminal import quoted as _safe
 
 from tests.helpers import make_repo
 
