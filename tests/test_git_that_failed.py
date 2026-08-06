@@ -83,7 +83,11 @@ class TestADamagedIndexIsNotACleanTree(_Repo):
         stage_file(root, "src/a.py")
         _damage_the_index(root)
         rc, out = _review(root)
-        self.assertIn("error", out.lower())
+        # `agentdiff:`, not `error:`.  Five commands ship from one install and
+        # four of them already say their own name; in a build log with several
+        # of them running, a line starting `error:` does not say who failed.
+        self.assertTrue(out.startswith("agentdiff: "),
+                        "did not say which command was failing: {!r}".format(out))
         self.assertIn("index", out.lower(),
                       "did not name the thing git could not read")
 

@@ -127,6 +127,11 @@ findings, the counts, and the file accounting (`files_changed`, `reviewed`,
 `unread`, `clean`) shown earlier. The exit code is the same either way, so a
 script can gate on the code and read the object for the detail.
 
+A run that could not start prints the same keys plus an `error` string, so the
+error path is not a different shape for your script to handle: `clean` is
+`false`, the counts are zero, and `unread` is an empty list rather than absent.
+Without `--json`, the message goes to stderr and starts with `agentdiff:`.
+
 **Exit codes:** 0 = nothing flagged at gating severity. 1 = one or more
 findings at HIGH or MED (or LOW under --strict), **or a changed file that
 could not be read**. 2 = usage error (not a git repo, unknown ref). 130 =
